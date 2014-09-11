@@ -1,0 +1,93 @@
+---
+title: "Wle Class Prediction"
+author: "Jacob"
+date: "09/11/2014"
+output: html_document
+---
+
+Our goal is to apply a machine learning algorithm to the Weight Lifting Excersize (WLE) dataset provided by Coursera in order to attempt to predict based on the sensor readings, in what manner the weights were being lifted.
+
+
+Before starting, we need to download the data from Coursera. I already did this using the following code:
+
+```{r eval=FALSE}
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "training.csv", "wget")
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "testing.csv", "wget")
+```
+Setup environment:
+``` {r message=FALSE}
+  set.seed(42)
+  require(knitr)
+  require(caret)
+  require(foreach)
+  opts_chunk$set(cache.extra = rand_seed, cache = TRUE)
+```
+
+Now lets load the data:
+```{r}
+  training <- read.csv("training.csv", na.strings = c("NA", "#DIV/0!"))
+  testing <- read.csv("testing.csv", na.strings = c("NA", "#DIV/0!"))
+```
+
+The data currently has `r length(training)` variables. Many of these are filled with missing data and the first 7 don't actually describe the weight lifting action (although they may provide some interesting context). We will only work with complete data that does describe the action. We will also convert this data to numeric to enable 
+preprocessing.
+
+```{r}
+  filterData <- function(df){
+    df <- df[colSums(is.na(training)) == 0][,-(1:7)]
+    for (i in 1:(length(df)-1)){
+      df[[i]] <- as.numeric(df[[i]])
+    }
+    df
+  }
+  testingF <-filterData(testing)
+  trainingF <- filterData(training)
+```
+
+For cross validation, lets split up the training data:
+```{r}
+  i <- createDataPartition(y = trainingF$classe, p = .7, list = FALSE)
+  trainPart <- trainingF[i,]
+  validPart <- trainingF[-i,]
+```
+Perform PCA on training set and apply to all of our sets
+```{r}
+pre <- preProcess(trainPart[,-length(trainPart)], method = "pca", pcaComp = 10)
+getPC <- function(df){
+  predict(pre, df[,-length(df)])
+}
+trainPC <- getPC(trainPart)
+validPC <- getPC(validPart)
+testPC <- getPC(testingF)
+```
+reset seed for caching purposes
+```{r cache=FALSE}
+set.seed(1134)
+```
+Start Random Forest algorithm to generate prediction model. I'm choosing this method as the slides claim it is what wins the kaggle competitions.
+```{r}
+  fit <- train(trainPC, trainPart$classe, method = "parRF")
+```
+Check the confusion matrix of our model in the training set
+```{r} 
+  confusionMatrix(predict(fit, newdata=trainPC),trainPart$classe)
+```
+Our in-sample error rate is about zero.
+Let's check how our model works on the validation set
+```{r}
+confusionMatrix(predict(fit, newdata=validPC),validPart$classe)
+```
+Based on the above we can estimate the out of sample error rate at about .05
+
+```{r echo=FALSE}
+#this code is for submitting results to coursera
+ans <- predict(fit, newdata=testPC)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(ans)
+```{r}
